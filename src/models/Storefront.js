@@ -10,18 +10,20 @@ const Storefront = coreDB.define(
     name: DataTypes.STRING,
     is_public: { type: DataTypes.BOOLEAN, defaultValue: false },
     created_at: DataTypes.DATE,
+    updated_at: DataTypes.DATE,
+    deleted_at: DataTypes.DATE,
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
   },
   {
     tableName: "storefronts",
     timestamps: true,
     underscored: true,
-  }
+    paranoid: true, // respects deleted_at
+    freezeTableName: true,
+  },
 );
-
-// Define associations HERE, not in the controller
-Storefront.belongsTo(CoreUser, {
-  foreignKey: "user_id",
-  as: "owner",
-});
 
 export default Storefront;

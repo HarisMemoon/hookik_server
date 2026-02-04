@@ -1,5 +1,8 @@
 import express from "express";
-import { getStorefrontsList } from "../controllers/storefrontController.js";
+import {
+  getStorefrontsList,
+  updateStorefront,
+} from "../controllers/storefrontController.js";
 
 const router = express.Router();
 
@@ -9,5 +12,6 @@ const router = express.Router();
  * @access  Protected (Admin Only)
  */
 router.get("/storefronts", getStorefrontsList);
+router.put("/storefronts/:id", updateStorefront);
 
 export default router;

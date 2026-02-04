@@ -6,24 +6,51 @@ import Supplier from "../models/Supplier.js";
 import Order from "../models/Order.js";
 import Transaction from "../models/Transaction.js";
 import Product from "../models/Product.js";
-import { setupAssociations } from "../models/associations.js";
-import { log } from "console";
-setupAssociations();
 
-// ---------- Helper Queries ----------
+async function getUserTotals() {
+  const q = `
+    SELECT
+      COUNT(*) AS total_users,
+      SUM(CASE WHEN role = 'seller' THEN 1 ELSE 0 END) AS brand_count,
+      SUM(CASE WHEN role = 'influencer' THEN 1 ELSE 0 END) AS influencer_count,
+      SUM(CASE WHEN role = 'customer' THEN 1 ELSE 0 END) AS customer_count
+    FROM users
+    WHERE role IN ('seller', 'influencer', 'customer');
+  `;
+  const [result] = await CoreUser.sequelize.query(q, {
+    type: Sequelize.QueryTypes.SELECT,
+  });
+  return result;
+}
+
+async function getActiveInfluencersWithStorefronts() {
+  const query = `
+    SELECT COUNT(DISTINCT u.id) as count
+    FROM users u
+    INNER JOIN storefronts s ON u.id = s.user_id
+    WHERE u.role = 'influencer'
+      AND s.deleted_at IS NULL
+  `;
+
+  const [result] = await CoreUser.sequelize.query(query, {
+    type: Sequelize.QueryTypes.SELECT,
+  });
+
+  return result.count || 0;
+}
 
 // User Growth
 async function getUserGrowthData() {
   const q = `
-    SELECT DATE_FORMAT(created_at, '%Y-%m') AS month, 
-           COUNT(*) AS total_count,
-           SUM(CASE WHEN role = 'seller' THEN 1 ELSE 0 END) AS brand_count,
-           SUM(CASE WHEN role = 'influencer' THEN 1 ELSE 0 END) AS influencer_count
-    FROM users
-    WHERE role IN ('seller', 'influencer', 'customer')
-    GROUP BY month
-    ORDER BY month ASC;
-  `;
+      SELECT DATE_FORMAT(created_at, '%Y-%m') AS month, 
+            COUNT(*) AS total_count,
+            SUM(CASE WHEN role = 'seller' THEN 1 ELSE 0 END) AS brand_count,
+            SUM(CASE WHEN role = 'influencer' THEN 1 ELSE 0 END) AS influencer_count
+      FROM users
+      WHERE role IN ('seller', 'influencer', 'customer')
+      GROUP BY month
+      ORDER BY month ASC;
+    `;
   return CoreUser.sequelize.query(q, { type: Sequelize.QueryTypes.SELECT });
 }
 
@@ -36,7 +63,7 @@ async function getRevenueBreakdown() {
         Sequelize.fn(
           "COALESCE",
           Sequelize.fn("SUM", Sequelize.col("amount")),
-          0
+          0,
         ),
         "totalAmount",
       ],
@@ -50,7 +77,7 @@ async function getRevenueBreakdown() {
   });
 }
 
-// Top Creators (FIXED ALIAS → User)
+// Top Creators - FIX THIS
 async function getTopCreators() {
   return Transaction.findAll({
     attributes: [
@@ -58,13 +85,13 @@ async function getTopCreators() {
         Sequelize.fn(
           "COALESCE",
           Sequelize.fn("SUM", Sequelize.col("amount")),
-          0
+          0,
         ),
         "totalEarnings",
       ],
-      [Sequelize.col("User.first_name"), "creatorName"],
-      [Sequelize.col("User.last_name"), "creatorLastName"],
-      [Sequelize.col("User.id"), "creatorId"],
+      [Sequelize.col("owner.first_name"), "creatorName"],
+      [Sequelize.col("owner.last_name"), "creatorLastName"],
+      [Sequelize.col("owner.id"), "creatorId"],
     ],
     where: {
       type: "earning_influencer",
@@ -73,18 +100,19 @@ async function getTopCreators() {
     include: [
       {
         model: CoreUser,
+        as: "owner", // ✅ ADD THIS - you were missing it!
         attributes: [],
         required: true,
       },
     ],
-    group: ["User.id", "User.first_name", "User.last_name"],
+    group: ["owner.id", "owner.first_name", "owner.last_name"],
     order: [[Sequelize.literal("totalEarnings"), "DESC"]],
     limit: 5,
     raw: true,
   });
 }
 
-// Active Payouts List (alias → User)
+// Active Payouts List - FIX THIS TOO
 async function getActivePayoutsList() {
   return Transaction.findAll({
     attributes: ["id", "amount", "status", "created_at"],
@@ -95,6 +123,7 @@ async function getActivePayoutsList() {
     include: [
       {
         model: CoreUser,
+        as: "owner", // ✅ ADD THIS - you were missing it!
         attributes: ["first_name", "last_name", "role"],
         required: true,
       },
@@ -109,12 +138,12 @@ async function getActivePayoutsList() {
 // Monthly Engagement
 async function getMonthlyEngagement() {
   const q = `
-    SELECT DATE_FORMAT(created_at, '%Y-%m') AS month, 
-           COUNT(*) AS total_orders
-    FROM orders
-    GROUP BY month
-    ORDER BY month ASC;
-  `;
+      SELECT DATE_FORMAT(created_at, '%Y-%m') AS month, 
+            COUNT(*) AS total_orders
+      FROM orders
+      GROUP BY month
+      ORDER BY month ASC;
+    `;
   return Order.sequelize.query(q, {
     type: Sequelize.QueryTypes.SELECT,
   });
@@ -124,16 +153,23 @@ async function getMonthlyEngagement() {
 export const getDashboardData = async (req, res) => {
   try {
     const results = await Promise.all([
-      Storefront.count({ where: { is_public: true } }),
+      Storefront.count({
+        where: {
+          is_public: true,
+        },
+      }),
       Supplier.count(),
-      Supplier.count({ where: { is_active: true } }),
-      CoreUser.count({
-        where: { role: { [Op.in]: ["seller", "influencer", "customer"] } },
+
+      // ✅ FIXED: Use the helper function
+      getActiveInfluencersWithStorefronts(),
+
+      getUserTotals(),
+      Order.sum("grand_total", {
+        where: {
+          status: "shipped",
+        },
       }),
 
-      Order.sum("grand_total", {
-        where: { status: { [Op.in]: ["paid", "shipped", "delivered"] } },
-      }),
       Transaction.sum("amount", {
         where: { type: "payout", status: "pending" },
       }),
@@ -144,7 +180,7 @@ export const getDashboardData = async (req, res) => {
         limit: 5,
       }),
       Supplier.findAll({
-        attributes: ["id", "name", "contact_person", "created_at"],
+        attributes: ["id", "name", "created_at"],
         order: [["created_at", "DESC"]],
         limit: 5,
       }),
@@ -164,15 +200,14 @@ export const getDashboardData = async (req, res) => {
       getTopCreators(),
       getMonthlyEngagement(),
       getUserGrowthData(),
-
       getActivePayoutsList(),
     ]);
 
     const [
       activeStorefrontsCount,
       totalSuppliersCount,
-      activeSuppliersCount,
-      totalUsersCount,
+      activeSuppliersCount, // ✅ This is now the count from getActiveInfluencersWithStorefronts()
+      userTotals,
       totalSalesVolume,
       pendingPayoutsAmount,
       recentStorefronts,
@@ -185,37 +220,47 @@ export const getDashboardData = async (req, res) => {
       userGrowth,
       activePayoutsListRaw,
     ] = results;
-    // ----------------------------------------------------
-    // 1. CALCULATE PLATFORM NET FEE (THE THIRD SLICE)
-    // ----------------------------------------------------
+
+    // Calculate Platform Net Fee
     const totalSalesFloat = parseFloat(totalSalesVolume || 0);
     const distributedEarnings = (revenueBreakdown || []).reduce(
       (sum, item) => sum + (parseFloat(item.totalAmount) || 0),
-      0
+      0,
     );
 
-    // Force fixed precision before subtraction
     const grossFixed = parseFloat(totalSalesFloat.toFixed(2));
     const distributedFixed = parseFloat(distributedEarnings.toFixed(2));
+    const platformNetFee = Math.max(
+      0,
+      parseFloat((grossFixed - distributedFixed).toFixed(2)),
+    );
 
-    const platformNetFee =
-      grossFixed > distributedFixed ? grossFixed - distributedFixed : 0;
-
-    // 2. Add the Platform Fee as the Third Slice to the revenueBreakdown array
     if (platformNetFee > 0) {
       revenueBreakdown.push({
         type: "platform_fee",
-        totalAmount: platformNetFee.toFixed(2), // Format as string for consistency
+        totalAmount: platformNetFee.toFixed(2),
       });
     }
+
     const topCreators = (topCreatorsRaw || []).map((c) => ({
       id: c.creatorId,
       name: `${c.creatorName || ""} ${c.creatorLastName || ""}`.trim(),
       sales: parseFloat(c.totalEarnings) || 0,
     }));
+
+    const safeUserTotals = userTotals || {
+      total_users: 0,
+      brand_count: 0,
+      influencer_count: 0,
+      customer_count: 0,
+    };
+
     return res.json({
       stats: {
-        totalUsers: totalUsersCount || 0,
+        totalUsers: safeUserTotals.total_users,
+        totalBrands: safeUserTotals.brand_count,
+        totalInfluencers: safeUserTotals.influencer_count,
+        totalCustomers: safeUserTotals.customer_count,
         activeStorefronts: activeStorefrontsCount || 0,
         totalSuppliers: totalSuppliersCount || 0,
         activeSuppliers: activeSuppliersCount || 0,

@@ -29,7 +29,7 @@ const CoreUser = coreDB.define(
     tableName: "users",
     timestamps: true, // Use created_at and updated_at
     underscored: true,
-  }
+  },
 );
 
 export default CoreUser;

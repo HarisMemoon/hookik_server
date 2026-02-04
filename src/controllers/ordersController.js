@@ -8,14 +8,16 @@ export const getOrdersList = async (req, res) => {
 
     const whereClause = {};
 
-    // 1. Handle Tab Filters
+    // Tab Filters
     if (filter === "inProgress") {
-      whereClause.status = { [Op.in]: ["paid", "shipped"] };
+      whereClause.status = "pending";
     } else if (filter === "completed") {
-      whereClause.status = "delivered";
+      whereClause.status = "shipped";
+    } else if (filter === "disputed") {
+      whereClause.status = "partial";
     }
 
-    // 2. Search by Order Code or Email
+    // Search
     if (search) {
       whereClause[Op.or] = [
         { order_code: { [Op.like]: `%${search}%` } },

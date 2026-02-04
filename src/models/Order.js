@@ -20,10 +20,11 @@ const Order = coreDB.define(
     tableName: "orders",
     timestamps: true,
     underscored: true,
-  }
+  },
 );
 
-// Association with the Buyer (User)
-Order.belongsTo(CoreUser, { foreignKey: "user_id", as: "buyer" });
+/** Associations */
+// Order.belongsTo(CoreUser, { foreignKey: "user_id", as: "buyer" });
+// CoreUser.hasMany(Order, { foreignKey: "user_id", as: "orders" });
 
 export default Order;
