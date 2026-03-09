@@ -1,7 +1,9 @@
-import Product from "../models/Product.js";
-import CoreUser from "../models/CoreUser.js";
 import { Op } from "sequelize";
 import ProductCategory from "../models/ProductCategory.js";
+import Image from "../models/Image.js";
+import Product from "../models/Product.js";
+import CoreUser from "../models/CoreUser.js";
+import { uploadToSpaces } from "../utils/uploadToSpaces.js";
 
 export const getProductsList = async (req, res) => {
   try {
@@ -62,6 +64,13 @@ export const getProductsList = async (req, res) => {
           attributes: ["id", "first_name", "last_name"],
         },
         {
+          model: Image,
+          as: "images",
+          attributes: ["id", "image_url"],
+          where: { imageable_type: "product" },
+          required: false,
+        },
+        {
           model: ProductCategory,
           as: "category",
           attributes: ["id", "name"],
@@ -80,6 +89,7 @@ export const getProductsList = async (req, res) => {
       order: [["created_at", "DESC"]],
       limit: Number(limit),
       offset,
+      distinct: true,
     });
 
     return res.json({
@@ -106,6 +116,7 @@ export const updateProduct = async (req, res) => {
     const { id } = req.params;
     const { name, category_id, price, description, stock, sku, status } =
       req.body;
+    const imageFile = req.file;
 
     console.log("Extracted values:", {
       name,
@@ -154,7 +165,30 @@ export const updateProduct = async (req, res) => {
       quantity: stock,
       status: status || product.status,
     });
+    let finalImageUrl = null;
 
+    if (imageFile) {
+      finalImageUrl = await uploadToSpaces(imageFile);
+    }
+
+    if (finalImageUrl) {
+      const existingImage = await Image.findOne({
+        where: {
+          imageable_id: id,
+          imageable_type: "product",
+        },
+      });
+
+      if (existingImage) {
+        await existingImage.update({ image_url: finalImageUrl });
+      } else {
+        await Image.create({
+          image_url: finalImageUrl,
+          imageable_id: id,
+          imageable_type: "product",
+        });
+      }
+    }
     console.log("Update successful!");
 
     return res.json({

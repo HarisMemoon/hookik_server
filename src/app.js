@@ -1,6 +1,7 @@
 // src/app.js
 import express from "express";
 import cors from "cors";
+import path from "path";
 import dotenv from "dotenv";
 import { connectDatabases } from "./config/database.js";
 import { verifyAdmin } from "./middleware/auth.middleware.js";
@@ -24,6 +25,7 @@ const PORT = process.env.PORT || 9292;
 
 app.use(cors());
 app.use(express.json());
+app.use("/storage", express.static(path.resolve("storage")));
 
 // Public health check route
 app.get("/", (req, res) => {

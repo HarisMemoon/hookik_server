@@ -7,6 +7,7 @@ import Product from "./Product.js";
 import ProductCategory from "./ProductCategory.js";
 import Collection from "./Collection.js";
 import Wallet from "./Wallet.js";
+import Image from "./Image.js";
 
 let associationsSetup = false;
 
@@ -113,7 +114,20 @@ export function setupAssociations() {
     foreignKey: "sub_sub_category_id",
     as: "subSubCategory",
   });
+  Product.hasMany(Image, {
+    foreignKey: "imageable_id",
+    constraints: false,
+    scope: {
+      imageable_type: "product", // Ensures only product images are fetched
+    },
+    as: "images",
+  });
 
+  Image.belongsTo(Product, {
+    foreignKey: "imageable_id",
+    constraints: false,
+    as: "product",
+  });
   // ============================================
   // PRODUCT CATEGORY ASSOCIATIONS (Self-referencing)
   // ============================================
