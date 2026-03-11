@@ -4,6 +4,7 @@ import Image from "../models/Image.js";
 import Product from "../models/Product.js";
 import CoreUser from "../models/CoreUser.js";
 import { uploadToSpaces } from "../utils/uploadToSpaces.js";
+import { logAction } from "../utils/logger.js";
 
 export const getProductsList = async (req, res) => {
   try {
@@ -189,7 +190,9 @@ export const updateProduct = async (req, res) => {
         });
       }
     }
-    console.log("Update successful!");
+    await logAction(req.admin.id, "UPDATE_PRODUCT", "Product", product.id, {
+      new_price: 5000,
+    });
 
     return res.json({
       message: "Product updated successfully",

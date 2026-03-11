@@ -14,6 +14,9 @@ import orderRoutes from "./routes/order.routes.js";
 import payoutRoutes from "./routes/payout.routes.js";
 import productCategoryRoutes from "./routes/product_categories.routes.js";
 import statsRoutes from "./routes/statsRoutes.routes.js";
+import emailRoutes from "./routes/email.routes.js";
+import adminUserRoutes from "./routes/adminUser.routes.js";
+import logsRoutes from "./routes/logs.routes.js";
 import { setupAssociations } from "./models/associations.js";
 
 setupAssociations();
@@ -31,7 +34,7 @@ app.use("/storage", express.static(path.resolve("storage")));
 app.get("/", (req, res) => {
   res.send("Hookik Admin Backend is running");
 });
-
+app.use("/api", emailRoutes);
 // 1. PUBLIC ROUTES (Authentication)
 app.use("/api/admin/auth", authRoutes);
 
@@ -45,12 +48,15 @@ app.use("/api/admin/dashboard", dashboardRoutes);
 // Protected User Management Routes (e.g., /api/admin/users)
 
 app.use("/api/admin", userRoutes);
+app.use("/api", emailRoutes);
 app.use("/api/admin", storefrontRoutes);
 app.use("/api/admin", productRoutes);
 app.use("/api/admin", orderRoutes);
 app.use("/api/admin", payoutRoutes);
 app.use("/api/admin", productCategoryRoutes);
 app.use("/api/admin", statsRoutes);
+app.use("/api/admin", adminUserRoutes);
+app.use("/api/admin", logsRoutes);
 
 // Start server AFTER databases connect
 connectDatabases()

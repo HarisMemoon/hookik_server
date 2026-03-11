@@ -7,6 +7,7 @@ import Storefront from "../models/Storefront.js";
 import Product from "../models/Product.js";
 import bcrypt from "bcryptjs";
 import { uploadProfilePictureToSpaces } from "../utils/uploadToSpaces.js";
+import { logAction } from "../utils/logger.js";
 
 // Maps client-side role to DB roles
 const roleMap = {
@@ -166,6 +167,21 @@ export const createUserByAdmin = async (req, res) => {
       is_email_verified: true,
       is_onboarding_completed: true,
     });
+    /* ===========================
+   8️⃣ Log the Action
+=========================== */
+    await logAction(
+      req.admin.id, // The Admin performing the action
+      "CREATE_USER", // Action Name
+      "User", // Target Type
+      newUser.id, // The newly created user's ID
+      {
+        email: email,
+        role: role,
+        status: status || "active",
+      },
+      req, // Pass req to capture IP address if you updated the helper
+    );
 
     return res.status(201).json({
       message: "User created successfully",
@@ -735,7 +751,6 @@ export const getUsersList = async (req, res) => {
       ];
     }
 
-    // ✅ FIX 1: Paginate at DB level — don't load all 3000 rows
     const { count: totalCount, rows: usersRaw } =
       await CoreUser.findAndCountAll({
         where: whereClause,
@@ -777,46 +792,73 @@ export const getUsersList = async (req, res) => {
       });
     }
 
-    // ✅ FIX 2: Aggregates now only run on this page's 20 IDs (not 3000)
-    const [ordersAgg, wallets, storefronts, salesAgg, productsCount] =
-      await Promise.all([
-        Order.findAll({
-          where: { user_id: userIds },
-          attributes: [
-            "user_id",
-            [fn("COUNT", col("id")), "total_orders"],
-            [
-              fn(
-                "SUM",
-                literal(
-                  "CASE WHEN status = 'paid' THEN grand_total ELSE 0 END",
-                ),
-              ),
-              "total_spent",
-            ],
+    const [
+      ordersAgg,
+      wallets,
+      storefronts,
+      salesAgg,
+      productsCount,
+      brandWalletAgg,
+      recentProducts,
+    ] = await Promise.all([
+      Order.findAll({
+        where: { user_id: userIds },
+        attributes: [
+          "user_id",
+          [fn("COUNT", col("id")), "total_orders"],
+          [
+            fn(
+              "SUM",
+              literal("CASE WHEN status = 'paid' THEN grand_total ELSE 0 END"),
+            ),
+            "total_spent",
           ],
-          group: ["user_id"],
-        }),
-        Wallet.findAll({ where: { user_id: userIds } }),
-        Storefront.findAll({
-          where: { user_id: userIds },
-          attributes: ["user_id", "name"],
-        }),
-        Transaction.findAll({
-          where: {
-            user_id: userIds,
-            type: "earning_influencer",
-            status: "completed",
-          },
-          attributes: ["user_id", [fn("SUM", col("amount")), "total_sales"]],
-          group: ["user_id"],
-        }),
-        Product.findAll({
-          where: { brand_id: userIds, deleted_at: null },
-          attributes: ["brand_id", [fn("COUNT", col("id")), "total_products"]],
-          group: ["brand_id"],
-        }),
-      ]);
+        ],
+        group: ["user_id"],
+      }),
+      Wallet.findAll({ where: { user_id: userIds } }),
+      Storefront.findAll({
+        where: { user_id: userIds },
+        attributes: ["user_id", "name"],
+      }),
+
+      Transaction.findAll({
+        where: {
+          user_id: userIds,
+          type: "earning_influencer",
+          status: "completed",
+        },
+        attributes: ["user_id", [fn("SUM", col("amount")), "total_sales"]],
+        group: ["user_id"],
+      }),
+      Product.findAll({
+        where: { brand_id: userIds, deleted_at: null },
+        attributes: ["brand_id", [fn("COUNT", col("id")), "total_products"]],
+        group: ["brand_id"],
+      }),
+      Transaction.findAll({
+        where: {
+          user_id: userIds,
+          [Op.or]: [
+            { type: "earning_vendor", status: "completed" },
+            { type: "earning_vendor", status: "pending" },
+            { type: "payout", status: "completed" },
+          ],
+        },
+        attributes: [
+          "user_id",
+          "type",
+          "status",
+          [fn("SUM", col("amount")), "total"],
+        ],
+        group: ["user_id", "type", "status"],
+      }),
+      Product.findAll({
+        where: { brand_id: userIds, deleted_at: null },
+        order: [["created_at", "DESC"]],
+        // ✅ No global LIMIT here — we limit per-brand in the map below
+      }),
+    ]);
 
     // Build maps
     const ordersMap = {};
@@ -842,7 +884,26 @@ export const getUsersList = async (req, res) => {
     productsCount.forEach((p) => {
       productsCountMap[p.brand_id] = Number(p.get("total_products")) || 0;
     });
-
+    const brandWalletMap = {};
+    brandWalletAgg.forEach((r) => {
+      const uid = r.user_id;
+      if (!brandWalletMap[uid]) {
+        brandWalletMap[uid] = { total_earned: 0, pending: 0, withdrawn: 0 };
+      }
+      const total = Number(r.get("total")) || 0;
+      if (r.type === "earning_vendor" && r.status === "completed")
+        brandWalletMap[uid].total_earned += total;
+      if (r.type === "earning_vendor" && r.status === "pending")
+        brandWalletMap[uid].pending += total;
+      if (r.type === "payout" && r.status === "completed")
+        brandWalletMap[uid].withdrawn += total;
+    });
+    const recentProductsMap = {};
+    recentProducts.forEach((p) => {
+      if (!recentProductsMap[p.brand_id]) recentProductsMap[p.brand_id] = [];
+      if (recentProductsMap[p.brand_id].length < 2)
+        recentProductsMap[p.brand_id].push(p);
+    });
     const users = usersRaw.map((u) => {
       const orders = ordersMap[u.id] || { total_orders: 0, total_spent: 0 };
       return {
@@ -853,6 +914,12 @@ export const getUsersList = async (req, res) => {
         storefront: storefrontMap[u.id] || "No Store",
         total_sales: salesMap[u.id] || 0,
         total_products: productsCountMap[u.id] || 0,
+        brand_wallet: brandWalletMap[u.id] || {
+          total_earned: 0,
+          pending: 0,
+          withdrawn: 0,
+        },
+        recentProducts: recentProductsMap[u.id] || [],
       };
     });
 
@@ -1017,7 +1084,21 @@ export const updateUserByAdmin = async (req, res) => {
       ...(role && { role }),
       ...updatedBusinessFields,
     });
-
+    /* ===========================
+       Log the Action
+    =========================== */
+    await logAction(
+      req.admin.id,
+      "UPDATE_USER",
+      "User",
+      user.id,
+      {
+        email: user.email,
+        updated_role: role || user.role,
+        fields_updated: Object.keys(req.body),
+      },
+      req,
+    );
     return res.json({ message: "User updated successfully", user });
   } catch (error) {
     console.error("Update User Error:", error);

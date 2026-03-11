@@ -8,6 +8,8 @@ import ProductCategory from "./ProductCategory.js";
 import Collection from "./Collection.js";
 import Wallet from "./Wallet.js";
 import Image from "./Image.js";
+import ActionLog from "./ActionLog.js";
+import AdminUser from "./AdminUser.js";
 
 let associationsSetup = false;
 
@@ -163,6 +165,17 @@ export function setupAssociations() {
   Wallet.belongsTo(CoreUser, {
     foreignKey: "user_id",
     as: "user",
+  });
+  // 🔹 Add this line:
+  ActionLog.belongsTo(AdminUser, {
+    foreignKey: "admin_id",
+    as: "admin", // This 'as' must match what you wrote in your controller's include block
+  });
+
+  // Optional: If you want to find all logs for a specific admin
+  AdminUser.hasMany(ActionLog, {
+    foreignKey: "admin_id",
+    as: "logs",
   });
 
   associationsSetup = true;
